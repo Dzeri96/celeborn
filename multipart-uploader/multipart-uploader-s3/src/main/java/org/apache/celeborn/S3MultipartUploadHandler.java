@@ -17,43 +17,28 @@
 
 package org.apache.celeborn;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.List;
-
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.ClientConfiguration;
-import com.amazonaws.auth.EnvironmentVariableCredentialsProvider;
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
 import com.amazonaws.event.ProgressListener;
 import com.amazonaws.retry.PredefinedBackoffStrategies;
 import com.amazonaws.retry.PredefinedRetryPolicies;
 import com.amazonaws.retry.RetryPolicy;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import com.amazonaws.services.s3.model.AbortMultipartUploadRequest;
-import com.amazonaws.services.s3.model.CompleteMultipartUploadRequest;
-import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
-import com.amazonaws.services.s3.model.InitiateMultipartUploadRequest;
-import com.amazonaws.services.s3.model.InitiateMultipartUploadResult;
-import com.amazonaws.services.s3.model.ListPartsRequest;
-import com.amazonaws.services.s3.model.PartETag;
-import com.amazonaws.services.s3.model.PartListing;
-import com.amazonaws.services.s3.model.PartSummary;
-import com.amazonaws.services.s3.model.UploadPartRequest;
+import com.amazonaws.services.s3.model.*;
+import org.apache.celeborn.server.common.service.mpu.MultipartUploadHandler;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.s3a.AWSCredentialProviderList;
 import org.apache.hadoop.fs.s3a.Constants;
-import org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider;
-import org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider;
-import org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.celeborn.server.common.service.mpu.MultipartUploadHandler;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class S3MultipartUploadHandler implements MultipartUploadHandler {
 
@@ -85,12 +70,6 @@ public class S3MultipartUploadHandler implements MultipartUploadHandler {
     this.maxBackoff = maxBackoff;
 
     Configuration conf = hadoopFs.getConf();
-    AWSCredentialProviderList providers = new AWSCredentialProviderList();
-    providers.add(new TemporaryAWSCredentialsProvider(conf));
-    providers.add(
-        new SimpleAWSCredentialsProvider(new URI(String.format("s3a://%s", bucketName)), conf));
-    providers.add(new EnvironmentVariableCredentialsProvider());
-    providers.add(new IAMInstanceCredentialsProvider());
 
     RetryPolicy retryPolicy =
         new RetryPolicy(
@@ -105,7 +84,7 @@ public class S3MultipartUploadHandler implements MultipartUploadHandler {
             .withMaxErrorRetry(s3MultiplePartUploadMaxRetries);
     this.s3Client =
         AmazonS3ClientBuilder.standard()
-            .withCredentials(providers)
+            .withCredentials(DefaultAWSCredentialsProviderChain.getInstance()) // TODO: Use config from Hadoop or DefaultAWSCredentialsProviderChain
             .withRegion(conf.get(Constants.AWS_REGION))
             .withClientConfiguration(clientConfig)
             .build();
