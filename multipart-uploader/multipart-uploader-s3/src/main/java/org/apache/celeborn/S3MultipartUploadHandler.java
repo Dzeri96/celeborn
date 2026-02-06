@@ -68,14 +68,13 @@ public class S3MultipartUploadHandler implements MultipartUploadHandler {
       Integer s3MultiplePartUploadMaxRetries,
       Integer baseDelay,
       Integer maxBackoff)
-      throws IOException, URISyntaxException {
+      throws IOException {
     this.bucketName = bucketName;
     this.s3MultiplePartUploadMaxRetries = s3MultiplePartUploadMaxRetries;
     this.baseDelay = baseDelay;
     this.maxBackoff = maxBackoff;
 
     Configuration conf = hadoopFs.getConf();
-    URI binding = new URI(String.format("s3a://%s", bucketName));
 
     RetryPolicy retryPolicy =
         new RetryPolicy(
@@ -90,7 +89,7 @@ public class S3MultipartUploadHandler implements MultipartUploadHandler {
             .withMaxErrorRetry(s3MultiplePartUploadMaxRetries);
     AmazonS3ClientBuilder builder =
         AmazonS3ClientBuilder.standard()
-            .withCredentials(getCredentialsProvider(binding, conf))
+            .withCredentials(getCredentialsProvider(hadoopFs.getUri(), conf))
             .withClientConfiguration(clientConfig);
     // for MinIO
     String endpoint = conf.get("fs.s3a.endpoint");

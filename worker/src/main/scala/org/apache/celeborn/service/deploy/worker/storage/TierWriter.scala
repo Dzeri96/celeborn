@@ -561,7 +561,6 @@ class DfsTierWriter(
 
       this.s3MultipartUploadHandler = TierWriterHelper.getS3MultipartUploadHandler(
         hadoopFs,
-        bucketName,
         key,
         conf.s3MultiplePartUploadMaxRetries,
         conf.s3MultiplePartUploadBaseDelay,
