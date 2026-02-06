@@ -63,8 +63,7 @@ object CelebornHadoopUtils extends Logging {
         "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider," +
           "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider," +
           "com.amazonaws.auth.EnvironmentVariableCredentialsProvider," +
-          "org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider," +
-          "com.amazonaws.auth.WebIdentityTokenCredentialsProvider")
+          "org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider")
 
       hadoopConf.set("fs.s3a.endpoint.region", conf.s3EndpointRegion)
     } else if (conf.ossDir.nonEmpty) {
