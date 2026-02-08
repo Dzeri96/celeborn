@@ -133,7 +133,7 @@ object Dependencies {
     ExclusionRule("com.amazonaws", "aws-java-sdk-bundle"))
   val awsS3 = "com.amazonaws" % "aws-java-sdk-s3" % awsS3Version
   // Needed for com.amazonaws.auth.WebIdentityTokenCredentialsProvider
-  val awsSTS = "com.amazonaws" % "aws-java-sdk-sts" $ awsS3Version
+  val awsSTS = "com.amazonaws" % "aws-java-sdk-sts" % awsS3Version
   val commonsCollections = "commons-collections" % "commons-collections" % commonsCollectionsVersion
   val hadoopAliyun = "org.apache.hadoop" % "hadoop-aliyun" % hadoopVersion
   val aliyunOss = "com.aliyun.oss" % "aliyun-sdk-oss" % aliyunOssVersion
