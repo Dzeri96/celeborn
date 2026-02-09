@@ -24,11 +24,7 @@ import org.apache.celeborn.server.common.service.mpu.MultipartUploadHandler;
 
 public class TierWriterHelper {
   public static MultipartUploadHandler getS3MultipartUploadHandler(
-      FileSystem hadoopFs,
-      String key,
-      int maxRetryies,
-      int baseDelay,
-      int maxBackoff) {
+      FileSystem hadoopFs, String key, int maxRetryies, int baseDelay, int maxBackoff) {
     return (MultipartUploadHandler)
         DynConstructors.builder()
             .impl(
