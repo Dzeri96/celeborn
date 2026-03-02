@@ -16,6 +16,7 @@
  */
 
 #include "celeborn/client/ShuffleClient.h"
+#include <limits>
 
 #include "celeborn/utils/CelebornUtils.h"
 
@@ -57,7 +58,20 @@ ShuffleClientImpl::ShuffleClientImpl(
     : appUniqueId_(appUniqueId),
       conf_(conf),
       clientFactory_(clientEndpoint.clientFactory()),
-      pushDataRetryPool_(clientEndpoint.pushDataRetryPool()) {
+      pushDataRetryPool_(clientEndpoint.pushDataRetryPool()),
+      shuffleCompressionEnabled_(
+          conf->shuffleCompressionCodec() != protocol::CompressionCodec::NONE),
+      compressorFactory_(
+          shuffleCompressionEnabled_
+              ? std::function<std::unique_ptr<compress::Compressor>()>(
+                    [conf]() {
+                      return compress::Compressor::createCompressor(*conf);
+                    })
+              : std::function<std::unique_ptr<compress::Compressor>()>()),
+      pushReplicateEnabled_(conf->clientPushReplicateEnabled()),
+      fetchExcludeWorkerOnFailureEnabled_(
+          conf->clientFetchExcludeWorkerOnFailureEnabled()),
+      fetchExcludedWorkers_(std::make_shared<FetchExcludedWorkers>()) {
   CELEBORN_CHECK_NOT_NULL(clientFactory_);
   CELEBORN_CHECK_NOT_NULL(pushDataRetryPool_);
 }
@@ -154,23 +168,74 @@ int ShuffleClientImpl::pushData(
   auto pushState = getPushState(mapKey);
   const int nextBatchId = pushState->nextBatchId();
 
-  // TODO: compression in writing is not supported.
+  // Validate input size fits in 32-bit int since it is required by compressor
+  // API and wire protocol
+  CELEBORN_CHECK(
+      length <= static_cast<size_t>(std::numeric_limits<int>::max()),
+      fmt::format(
+          "Data length {} exceeds maximum supported size {}",
+          length,
+          std::numeric_limits<int>::max()));
 
-  auto writeBuffer =
-      memory::ByteBuffer::createWriteOnly(kBatchHeaderSize + length);
+  // Compression support: compress data if compression is enabled
+  const uint8_t* dataToWrite = data + offset;
+  int lengthToWrite = static_cast<int>(length);
+  std::unique_ptr<uint8_t[]> compressedBuffer;
+
+  if (shuffleCompressionEnabled_ && compressorFactory_) {
+    // Create a new compressor instance for thread-safety
+    auto compressor = compressorFactory_();
+    // Allocate buffer for compressed data
+    const size_t compressedCapacity =
+        compressor->getDstCapacity(static_cast<int>(length));
+    compressedBuffer = std::make_unique<uint8_t[]>(compressedCapacity);
+
+    // Compress the data
+    const size_t compressedSize = compressor->compress(
+        dataToWrite, 0, static_cast<int>(length), compressedBuffer.get(), 0);
+
+    CELEBORN_CHECK(
+        compressedSize <= static_cast<size_t>(std::numeric_limits<int>::max()),
+        fmt::format(
+            "Compressed size {} exceeds maximum supported size {}",
+            compressedSize,
+            std::numeric_limits<int>::max()));
+
+    lengthToWrite = static_cast<int>(compressedSize);
+    dataToWrite = compressedBuffer.get();
+  }
+
+  // Validate final buffer size fits in size_t and int
+  CELEBORN_CHECK(
+      static_cast<size_t>(lengthToWrite) <=
+          std::numeric_limits<size_t>::max() - kBatchHeaderSize,
+      fmt::format(
+          "Buffer size {} + header {} would overflow",
+          lengthToWrite,
+          kBatchHeaderSize));
+
+  auto writeBuffer = memory::ByteBuffer::createWriteOnly(
+      kBatchHeaderSize + static_cast<size_t>(lengthToWrite));
   // TODO: the java side uses Platform to write the data. We simply assume
   //  littleEndian here.
   writeBuffer->writeLE<int>(mapId);
   writeBuffer->writeLE<int>(attemptId);
   writeBuffer->writeLE<int>(nextBatchId);
-  writeBuffer->writeLE<int>(length);
-  writeBuffer->writeFromBuffer(data, offset, length);
+  writeBuffer->writeLE<int>(lengthToWrite);
+  writeBuffer->writeFromBuffer(
+      dataToWrite, 0, static_cast<size_t>(lengthToWrite));
 
   auto hostAndPushPort = partitionLocation->hostAndPushPort();
   // Check limit.
   limitMaxInFlight(mapKey, *pushState, hostAndPushPort);
   // Add inFlight requests.
-  const int batchBytesSize = length + kBatchHeaderSize;
+  CELEBORN_CHECK(
+      lengthToWrite <= std::numeric_limits<int>::max() - kBatchHeaderSize,
+      fmt::format(
+          "Batch bytes size {} + header {} would overflow int",
+          lengthToWrite,
+          kBatchHeaderSize));
+  const int batchBytesSize = lengthToWrite + kBatchHeaderSize;
   pushState->addBatch(nextBatchId, batchBytesSize, hostAndPushPort);
   // Build pushData request.
   const auto shuffleKey = utils::makeShuffleKey(appUniqueId_, shuffleId);
@@ -287,7 +352,21 @@ std::unique_ptr<CelebornInputStream> ShuffleClientImpl::readPartition(
       attemptNumber,
       startMapIndex,
       endMapIndex,
-      needCompression);
+      needCompression,
+      fetchExcludedWorkers_,
+      this);
+}
+
+void ShuffleClientImpl::excludeFailedFetchLocation(
+    const std::string& hostAndFetchPort,
+    const std::exception& e) {
+  if (pushReplicateEnabled_ && fetchExcludeWorkerOnFailureEnabled_ &&
+      utils::isCriticalCauseForFetch(e)) {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+                   .count();
+    fetchExcludedWorkers_->set(hostAndFetchPort, now);
+  }
 }
 
 void ShuffleClientImpl::updateReducerFileGroup(int shuffleId) {

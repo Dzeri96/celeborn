@@ -62,8 +62,8 @@ object Dependencies {
   val jdkToolsVersion = "0.1"
   val metricsVersion = "4.2.25"
   val mockitoVersion = "4.11.0"
-  val nettyVersion = "4.1.118.Final"
-  val ratisVersion = "3.1.3"
+  val nettyVersion = "4.2.10.Final"
+  val ratisVersion = "3.2.1"
   val roaringBitmapVersion = "1.0.6"
   val rocksdbJniVersion = "9.10.0"
   val jacksonVersion = "2.15.3"
@@ -132,6 +132,8 @@ object Dependencies {
   val hadoopAws = "org.apache.hadoop" % "hadoop-aws" % hadoopVersion excludeAll (
     ExclusionRule("com.amazonaws", "aws-java-sdk-bundle"))
   val awsS3 = "com.amazonaws" % "aws-java-sdk-s3" % awsS3Version
+  // Needed for com.amazonaws.auth.WebIdentityTokenCredentialsProvider
+  val awsSTS = "com.amazonaws" % "aws-java-sdk-sts" % awsS3Version
   val commonsCollections = "commons-collections" % "commons-collections" % commonsCollectionsVersion
   val hadoopAliyun = "org.apache.hadoop" % "hadoop-aliyun" % hadoopVersion
   val aliyunOss = "com.aliyun.oss" % "aliyun-sdk-oss" % aliyunOssVersion
@@ -140,7 +142,26 @@ object Dependencies {
     ExclusionRule("com.rabbitmq", "amqp-client"))
   val ioDropwizardMetricsJvm = "io.dropwizard.metrics" % "metrics-jvm" % metricsVersion
   val ioNetty = "io.netty" % "netty-all" % nettyVersion excludeAll(
-    ExclusionRule("io.netty", "netty-handler-ssl-ocsp"))
+    ExclusionRule("io.netty", "netty-codec-haproxy"),
+    ExclusionRule("io.netty", "netty-codec-memcache"),
+    ExclusionRule("io.netty", "netty-codec-mqtt"),
+    ExclusionRule("io.netty", "netty-codec-redis"),
+    ExclusionRule("io.netty", "netty-codec-smtp"),
+    ExclusionRule("io.netty", "netty-codec-stomp"),
+    ExclusionRule("io.netty", "netty-codec-xml"),
+    ExclusionRule("io.netty", "netty-resolver-dns-classes-macos"),
+    ExclusionRule("io.netty", "netty-resolver-dns-native-macos"),
+    ExclusionRule("io.netty", "netty-transport-rxtx"),
+    ExclusionRule("io.netty", "netty-transport-sctp"),
+    ExclusionRule("io.netty", "netty-transport-udt"),
+    ExclusionRule("io.netty", "netty-transport-sctp"),
+    ExclusionRule("io.netty", "netty-handler-ssl-ocsp"),
+    ExclusionRule("org.jctools", "jctools-core")
+  )
+  val ioNettyEpollLinuxX8664 = "io.netty" % "netty-transport-native-epoll" % nettyVersion classifier "linux-x86_64"
+  val ioNettyEpollLinuxAarch64 = "io.netty" % "netty-transport-native-epoll" % nettyVersion classifier "linux-aarch_64"
+  val ioNettyKqueueOsxX8664 = "io.netty" % "netty-transport-native-kqueue" % nettyVersion classifier "osx-x86_64"
+  val ioNettyKqueueOsxAach64 = "io.netty" % "netty-transport-native-kqueue" % nettyVersion classifier "osx-aarch_64"
   val leveldbJniGroup = if (System.getProperty("os.name").startsWith("Linux")
     && System.getProperty("os.arch").equals("aarch64")) {
     // use org.openlabtesting.leveldbjni on aarch64 platform except MacOS
@@ -296,7 +317,8 @@ object CelebornCommonSettings {
   val SCALA_2_13_5 = "2.13.5"
   val SCALA_2_13_8 = "2.13.8"
   val SCALA_2_13_16 = "2.13.16"
-  val ALL_SCALA_VERSIONS = Seq(SCALA_2_11_12, SCALA_2_12_10, SCALA_2_12_15, SCALA_2_12_17, SCALA_2_12_18, SCALA_2_13_5, SCALA_2_13_8, SCALA_2_13_16)
+  val SCALA_2_13_17 = "2.13.17"
+  val ALL_SCALA_VERSIONS = Seq(SCALA_2_11_12, SCALA_2_12_10, SCALA_2_12_15, SCALA_2_12_17, SCALA_2_12_18, SCALA_2_13_5, SCALA_2_13_8, SCALA_2_13_16, SCALA_2_13_17)
 
   val DEFAULT_SCALA_VERSION = SCALA_2_12_18
 
@@ -350,7 +372,9 @@ object CelebornCommonSettings {
       "--add-opens=java.base/sun.security.action=ALL-UNNAMED",
       "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
       "--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED",
-      "-Dio.netty.tryReflectionSetAccessible=true"
+      "-Dio.netty.tryReflectionSetAccessible=true",
+      "-Dio.netty.allocator.type=pooled",
+      "-Dio.netty.handler.ssl.defaultEndpointVerificationAlgorithm=NONE"
     ),
 
     testOptions += Tests.Argument("-oF"),
@@ -500,6 +524,7 @@ object Utils {
     case Some("spark-3.4") => Some(Spark34)
     case Some("spark-3.5") => Some(Spark35)
     case Some("spark-4.0") => Some(Spark40)
+    case Some("spark-4.1") => Some(Spark41)
     case _ => None
   }
 
@@ -599,7 +624,7 @@ object CelebornSpi {
 
 object CeleborMPU {
 
-  lazy val hadoopAwsDependencies = Seq(Dependencies.hadoopAws, Dependencies.awsS3)
+  lazy val hadoopAwsDependencies = Seq(Dependencies.hadoopAws, Dependencies.awsS3, Dependencies.awsSTS)
   lazy val hadoopAliyunDependencies = Seq(Dependencies.commonsCollections, Dependencies.hadoopAliyun, Dependencies.aliyunOss)
 
   lazy val celeborMPU = Project("celeborn-multipart-uploader-s3", file("multipart-uploader/multipart-uploader-s3"))
@@ -640,6 +665,10 @@ object CelebornCommon {
         Dependencies.ioDropwizardMetricsGraphite,
         Dependencies.ioDropwizardMetricsJvm,
         Dependencies.ioNetty,
+        Dependencies.ioNettyEpollLinuxX8664,
+        Dependencies.ioNettyEpollLinuxAarch64,
+        Dependencies.ioNettyKqueueOsxX8664,
+        Dependencies.ioNettyKqueueOsxAach64,
         Dependencies.commonsCrypto,
         Dependencies.commonsLang3,
         Dependencies.hadoopClientApi,
@@ -696,6 +725,10 @@ object CelebornClient {
       commonSettings,
       libraryDependencies ++= Seq(
         Dependencies.ioNetty,
+        Dependencies.ioNettyEpollLinuxX8664,
+        Dependencies.ioNettyEpollLinuxAarch64,
+        Dependencies.ioNettyKqueueOsxX8664,
+        Dependencies.ioNettyKqueueOsxAach64,
         Dependencies.guava,
         Dependencies.lz4Java,
         Dependencies.zstdJni,
@@ -716,6 +749,10 @@ object CelebornService {
         Dependencies.findbugsJsr305,
         Dependencies.commonsIo,
         Dependencies.ioNetty,
+        Dependencies.ioNettyEpollLinuxX8664,
+        Dependencies.ioNettyEpollLinuxAarch64,
+        Dependencies.ioNettyKqueueOsxX8664,
+        Dependencies.ioNettyKqueueOsxAach64,
         Dependencies.commonsCrypto,
         Dependencies.slf4jApi,
         Dependencies.mybatis,
@@ -769,6 +806,10 @@ object CelebornMaster {
         Dependencies.guava,
         Dependencies.protobufJava,
         Dependencies.ioNetty,
+        Dependencies.ioNettyEpollLinuxX8664,
+        Dependencies.ioNettyEpollLinuxAarch64,
+        Dependencies.ioNettyKqueueOsxX8664,
+        Dependencies.ioNettyKqueueOsxAach64,
         Dependencies.hadoopClientApi,
         Dependencies.log4j12Api,
         Dependencies.log4jSlf4jImpl,
@@ -806,6 +847,10 @@ object CelebornWorker {
         Dependencies.guava,
         Dependencies.commonsIo,
         Dependencies.ioNetty,
+        Dependencies.ioNettyEpollLinuxX8664,
+        Dependencies.ioNettyEpollLinuxAarch64,
+        Dependencies.ioNettyKqueueOsxX8664,
+        Dependencies.ioNettyKqueueOsxAach64,
         Dependencies.log4j12Api,
         Dependencies.log4jSlf4jImpl,
         Dependencies.disruptor,
@@ -943,6 +988,23 @@ object Spark40 extends SparkClientProjects {
 
   val sparkVersion = "4.0.1"
   val zstdJniVersion = "1.5.6-9"
+  val scalaBinaryVersion = "2.13"
+
+  override val sparkColumnarShuffleVersion: String = "4"
+}
+
+object Spark41 extends SparkClientProjects {
+
+  val sparkClientProjectPath = "client-spark/spark-3"
+  val sparkClientProjectName = "celeborn-client-spark-4"
+  val sparkClientShadedProjectPath = "client-spark/spark-4-shaded"
+  val sparkClientShadedProjectName = "celeborn-client-spark-4-shaded"
+
+  val lz4JavaVersion = "1.8.0"
+  val sparkProjectScalaVersion = "2.13.17"
+
+  val sparkVersion = "4.1.1"
+  val zstdJniVersion = "1.5.7-6"
   val scalaBinaryVersion = "2.13"
 
   override val sparkColumnarShuffleVersion: String = "4"
