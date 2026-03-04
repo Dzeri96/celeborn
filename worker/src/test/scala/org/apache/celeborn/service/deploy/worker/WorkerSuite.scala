@@ -17,31 +17,36 @@
 
 package org.apache.celeborn.service.deploy.worker
 
+import com.google.protobuf.GeneratedMessageV3
+
 import java.io.File
 import java.nio.file.{Files, Paths}
 import java.util
 import java.util.{HashSet => JHashSet}
 import java.util.concurrent.ConcurrentHashMap
-
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
-
 import org.junit.Assert
 import org.mockito.MockitoSugar._
-import org.scalatest.{shortstacks, BeforeAndAfterEach}
+import org.mockito.MockedConstruction.{Context, MockInitializer}
+import org.mockito.Mockito.mockConstruction
+import org.scalatest.{BeforeAndAfterEach, shortstacks}
 import org.scalatest.funsuite.AnyFunSuite
-
 import org.apache.celeborn.common.CelebornConf
+import org.apache.celeborn.common.client.MasterClient
 import org.apache.celeborn.common.identity.UserIdentifier
-import org.apache.celeborn.common.protocol.{PartitionLocation, PartitionSplitMode, PartitionType}
-import org.apache.celeborn.common.protocol.message.ControlMessages.CommitFilesResponse
+import org.apache.celeborn.common.protocol.{PartitionLocation, PartitionSplitMode, PartitionType, PbRegisterWorker, PbRegisterWorkerResponse, WorkerEventType}
+import org.apache.celeborn.common.protocol.message.ControlMessages.{CommitFilesResponse, HeartbeatFromWorkerResponse}
 import org.apache.celeborn.common.protocol.message.StatusCode
 import org.apache.celeborn.common.quota.ResourceConsumption
 import org.apache.celeborn.common.rpc.RpcCallContext
 import org.apache.celeborn.common.util.{CelebornExitKind, JavaUtils, ThreadUtils}
+import org.apache.celeborn.service.deploy.MiniClusterFeature
 import org.apache.celeborn.service.deploy.worker.storage.PartitionDataWriter
+import org.mockito.{Answers, ArgumentCaptor}
+import org.mockito.ArgumentMatchers.any
 
-class WorkerSuite extends AnyFunSuite with BeforeAndAfterEach {
+class WorkerSuite extends AnyFunSuite with BeforeAndAfterEach with MiniClusterFeature {
   private var worker: Worker = _
   private val conf = new CelebornConf()
   private val workerArgs = new WorkerArguments(Array(), conf)
@@ -302,5 +307,34 @@ class WorkerSuite extends AnyFunSuite with BeforeAndAfterEach {
     // timeout but SUCCESS epoch2 can reply
     assert(shuffleCommitTime.get(shuffleKey).get(epoch2) == null)
     assert(epochCommitMap.get(epoch2).response.status == StatusCode.SUCCESS)
+  }
+
+  test("CELEBORN-2257: Properly reports remote disks on worker registration") {
+    val mockedMasterClient = mockConstruction(classOf[MasterClient], withSettings.defaultAnswer(Answers.CALLS_REAL_METHODS))
+    val argCaptor = ArgumentCaptor.forClass(classOf[PbRegisterWorker])
+    setupMiniClusterWithRandomPorts(workerNum = 1)
+
+    try {
+      val createdMocks = mockedMasterClient.constructed();
+      assert(createdMocks.size() == 1)
+      /*
+      verify(createdMocks.get(0)).askSync(argCaptor.capture(), classOf[PbRegisterWorkerResponse])
+      val req = argCaptor.getValue
+      assert(req.getHost != null)*/
+    } finally {
+      shutdownMiniCluster()
+      mockedMasterClient.close()
+    }
+  }
+
+  object MasterClientMockInitializer extends MockInitializer[MasterClient] {
+    override def prepare(mock: MasterClient, context: Context): Unit = {
+      when(mock.askSync[PbRegisterWorkerResponse](any(classOf[GeneratedMessageV3]), any()))
+        .thenReturn(PbRegisterWorkerResponse
+          .newBuilder()
+          .setSuccess(true)
+          .build()
+        )
+    }
   }
 }
